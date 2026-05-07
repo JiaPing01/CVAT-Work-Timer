@@ -1,0 +1,260 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>工作進度雲端同步系統</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        body { background-color: #f0f2f5; font-family: 'PingFang TC', 'Microsoft JhengHei', sans-serif; }
+        .card { background: white; padding: 1.5rem; border-radius: 1rem; box-shadow: 0 4px 12px rgba(0,0,0,0.05); }
+        .progress-bg { background-color: #e5e7eb; border-radius: 999px; height: 12px; overflow: hidden; }
+        .progress-bar { height: 100%; transition: width 0.8s cubic-bezier(0.34, 1.56, 0.64, 1); }
+        .loading-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(255,255,255,0.8); display: flex; justify-content: center; align-items: center; z-index: 100; transition: opacity 0.5s; }
+    </style>
+</head>
+<body class="p-4 md:p-8">
+    <!-- 載入中遮罩 -->
+    <div id="loader" class="loading-overlay">
+        <div class="text-center">
+            <div class="inline-block animate-spin rounded-full h-8 w-8 border-4 border-blue-500 border-t-transparent"></div>
+            <p class="mt-2 text-gray-600 font-medium">雲端數據同步中...</p>
+        </div>
+    </div>
+
+    <div class="max-w-2xl mx-auto space-y-6">
+        <h1 class="text-2xl font-bold text-gray-800 text-center">🚀 標記任務雲端系統</h1>
+
+        <!-- 進度條儀表板 -->
+        <div class="card space-y-6">
+            <div>
+                <div class="flex justify-between mb-2">
+                    <span class="text-sm font-medium text-blue-700">完成進度 (張數)</span>
+                    <span id="taskPercent" class="text-sm font-bold text-blue-700">0%</span>
+                </div>
+                <div class="progress-bg">
+                    <div id="taskBar" class="progress-bar bg-blue-500" style="width: 0%"></div>
+                </div>
+            </div>
+            <div>
+                <div class="flex justify-between mb-2">
+                    <span class="text-sm font-medium text-purple-700">時間消耗 (天數)</span>
+                    <span id="timePercent" class="text-sm font-bold text-purple-700">0%</span>
+                </div>
+                <div class="progress-bg">
+                    <div id="timeBar" class="progress-bar bg-purple-500" style="width: 0%"></div>
+                </div>
+            </div>
+            <p id="statusMsg" class="text-center text-sm font-semibold italic"></p>
+        </div>
+
+        <!-- 核心數據顯示 -->
+        <div class="grid grid-cols-2 gap-4">
+            <div class="card border-t-4 border-blue-500 text-center">
+                <p class="text-xs text-gray-500">今日應標</p>
+                <p id="dailyTarget" class="text-2xl font-black text-blue-600">--</p>
+            </div>
+            <div class="card border-t-4 border-red-500 text-center">
+                <p class="text-xs text-gray-500">目前進度落後</p>
+                <p id="lagging" class="text-2xl font-black text-red-600">--</p>
+            </div>
+            <div class="card border-t-4 border-green-500 text-center">
+                <p class="text-xs text-gray-500">預估進帳</p>
+                <p id="earned" class="text-2xl font-black text-green-600">--</p>
+            </div>
+            <div class="card border-t-4 border-purple-500 text-center">
+                <p class="text-xs text-gray-500">剩餘天數</p>
+                <p id="daysLeft" class="text-2xl font-black text-purple-600">--</p>
+            </div>
+        </div>
+
+        <!-- 參數設定與打卡 -->
+        <div class="card space-y-4">
+            <div class="flex justify-between items-center border-b pb-2">
+                <h2 class="font-semibold text-lg text-gray-700">⚙️ 參數與打卡</h2>
+                <span id="syncStatus" class="text-[10px] bg-green-100 text-green-600 px-2 py-1 rounded">雲端連線正常</span>
+            </div>
+            <div class="grid grid-cols-2 gap-4">
+                <div>
+                    <label class="block text-xs text-gray-500">開工日期</label>
+                    <input type="date" id="startDate" class="w-full border rounded p-2 text-sm bg-gray-50">
+                </div>
+                <div>
+                    <label class="block text-xs text-gray-500">截止日期</label>
+                    <input type="date" id="deadline" class="w-full border rounded p-2 text-sm bg-gray-50">
+                </div>
+                <div>
+                    <label class="block text-xs text-gray-500">總張數</label>
+                    <input type="number" id="totalTasks" class="w-full border rounded p-2 text-sm bg-gray-50">
+                </div>
+                <div>
+                    <label class="block text-xs text-gray-500">總獎金</label>
+                    <input type="number" id="totalPay" class="w-full border rounded p-2 text-sm bg-gray-50">
+                </div>
+            </div>
+
+            <div class="flex items-center justify-between pt-4 border-t">
+                <div class="flex items-center space-x-4">
+                    <button onclick="adjustTask(-1)" class="bg-gray-100 px-4 py-2 rounded-lg font-bold hover:bg-gray-200 transition">-1</button>
+                    <input type="number" id="completed" value="0" class="w-20 text-center border-b-2 border-blue-500 text-xl font-bold focus:outline-none bg-transparent">
+                    <button onclick="adjustTask(1)" class="bg-blue-100 px-4 py-2 rounded-lg font-bold text-blue-600 hover:bg-blue-200 transition">+1</button>
+                </div>
+                <button id="saveBtn" onclick="saveData()" class="bg-slate-800 text-white px-6 py-2 rounded-lg hover:bg-slate-700 transition text-sm flex items-center">
+                    <span>同步雲端</span>
+                </button>
+            </div>
+        </div>
+
+        <!-- 曲線圖 -->
+        <div class="card">
+            <h2 class="font-semibold text-lg text-gray-700 mb-4">📈 歷史進度趨勢</h2>
+            <canvas id="trendChart" height="180"></canvas>
+        </div>
+    </div>
+
+    <script>
+        const API_URL = "https://script.google.com/macros/s/AKfycbzE9f5KFW5O2Yc24Kae5SOdJWcAOhHMztFHptYMGPhc9fPWBdMYSPLr2FGUCK2ywMJFug/exec";
+        let taskHistory = {};
+        let myChart;
+
+        // 初始化與讀取數據
+        window.onload = async () => {
+            try {
+                const response = await fetch(API_URL);
+                const data = await response.json();
+                
+                if (data) {
+                    document.getElementById('totalTasks').value = data.totalTasks || 772;
+                    document.getElementById('totalPay').value = data.totalPay || 15000;
+                    document.getElementById('completed').value = data.completed || 0;
+                    document.getElementById('startDate').value = data.startDate.split('T')[0];
+                    document.getElementById('deadline').value = data.deadline.split('T')[0];
+                    
+                    taskHistory = {};
+                    data.history.forEach(row => {
+                        const dateStr = new Date(row[0]).toISOString().split('T')[0];
+                        taskHistory[dateStr] = row[1];
+                    });
+                }
+            } catch (e) {
+                console.error("同步失敗", e);
+                document.getElementById('syncStatus').innerText = "離線模式";
+                document.getElementById('syncStatus').className = "text-[10px] bg-red-100 text-red-600 px-2 py-1 rounded";
+            } finally {
+                document.getElementById('loader').style.opacity = '0';
+                setTimeout(() => document.getElementById('loader').style.display = 'none', 500);
+                updateUI();
+            }
+        };
+
+        function adjustTask(val) {
+            const input = document.getElementById('completed');
+            input.value = Math.max(0, parseInt(input.value) + val);
+            updateUI(); 
+        }
+
+        async function saveData() {
+            const btn = document.getElementById('saveBtn');
+            const originalText = btn.innerHTML;
+            btn.disabled = true;
+            btn.innerHTML = "傳送中...";
+
+            const payload = {
+                total: parseInt(document.getElementById('totalTasks').value),
+                pay: parseInt(document.getElementById('totalPay').value),
+                done: parseInt(document.getElementById('completed').value),
+                start: document.getElementById('startDate').value,
+                deadline: document.getElementById('deadline').value
+            };
+
+            try {
+                await fetch(API_URL, {
+                    method: "POST",
+                    body: JSON.stringify(payload)
+                });
+                // 更新圖表紀錄
+                const todayStr = new Date().toISOString().split('T')[0];
+                taskHistory[todayStr] = payload.done;
+                updateUI();
+            } catch (e) {
+                alert("儲存失敗，請檢查網路連線");
+            } finally {
+                btn.disabled = false;
+                btn.innerHTML = originalText;
+            }
+        }
+
+        function updateUI() {
+            const start = new Date(document.getElementById('startDate').value);
+            const end = new Date(document.getElementById('deadline').value);
+            const now = new Date();
+            now.setHours(0,0,0,0);
+
+            const total = parseInt(document.getElementById('totalTasks').value) || 1;
+            const pay = parseInt(document.getElementById('totalPay').value) || 0;
+            const done = parseInt(document.getElementById('completed').value) || 0;
+
+            const totalDuration = (end - start) / (1000 * 60 * 60 * 24) || 1;
+            const elapsedDays = Math.max(0, (now - start) / (1000 * 60 * 60 * 24));
+            const remainingDays = Math.ceil((end - now) / (1000 * 60 * 60 * 24));
+            
+            const timeProgress = Math.min(100, Math.max(0, (elapsedDays / totalDuration) * 100));
+            const taskProgress = Math.min(100, (done / total) * 100);
+
+            const idealDoneCount = (total / totalDuration) * elapsedDays;
+            const laggingCount = Math.ceil(idealDoneCount - done);
+            const dailyTargetNeeded = remainingDays > 0 ? ((total - done) / remainingDays).toFixed(1) : (total - done);
+            const earned = Math.floor(done * (pay / total));
+
+            // 更新 DOM
+            document.getElementById('taskBar').style.width = taskProgress + '%';
+            document.getElementById('taskPercent').innerText = taskProgress.toFixed(1) + '%';
+            document.getElementById('timeBar').style.width = timeProgress + '%';
+            document.getElementById('timePercent').innerText = timeProgress.toFixed(1) + '%';
+            document.getElementById('daysLeft').innerText = remainingDays > 0 ? remainingDays : "！";
+            document.getElementById('dailyTarget').innerText = remainingDays > 0 ? dailyTargetNeeded : "!";
+            document.getElementById('earned').innerText = `$` + earned.toLocaleString();
+            
+            const laggingEl = document.getElementById('lagging');
+            laggingEl.innerText = laggingCount > 0 ? `${laggingCount} 張` : (laggingCount < 0 ? `領先 ${Math.abs(laggingCount)}` : "準時");
+            laggingEl.className = laggingCount > 0 ? "text-2xl font-black text-red-600" : "text-2xl font-black text-green-600";
+
+            const statusMsg = document.getElementById('statusMsg');
+            statusMsg.innerText = taskProgress >= timeProgress ? "✨ 進度優於時間，漂亮！" : "⚠️ 進度落後時間，要追一下喔！";
+            statusMsg.className = `text-center text-sm font-semibold ${taskProgress >= timeProgress ? 'text-green-600' : 'text-red-500'}`;
+
+            updateChart();
+        }
+
+        function updateChart() {
+            const ctx = document.getElementById('trendChart').getContext('2d');
+            const sortedDates = Object.keys(taskHistory).sort();
+            const dataValues = sortedDates.map(date => taskHistory[date]);
+
+            if (myChart) myChart.destroy();
+
+            myChart = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: sortedDates.map(d => d.split('-').slice(1).join('/')),
+                    datasets: [{
+                        data: dataValues,
+                        borderColor: '#3b82f6',
+                        backgroundColor: 'rgba(59, 130, 246, 0.05)',
+                        fill: true,
+                        tension: 0.4,
+                        borderWidth: 3,
+                        pointRadius: 3
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    scales: { y: { beginAtZero: true }, x: { grid: { display: false } } },
+                    plugins: { legend: { display: false } }
+                }
+            });
+        }
+    </script>
+</body>
+</html>
