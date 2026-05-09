@@ -12,6 +12,8 @@
         .progress-bg { background-color: #e5e7eb; border-radius: 999px; height: 12px; overflow: hidden; }
         .progress-bar { height: 100%; transition: width 0.8s cubic-bezier(0.34, 1.56, 0.64, 1); }
         .loading-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(255,255,255,0.8); display: flex; justify-content: center; align-items: center; z-index: 100; transition: opacity 0.5s; }
+        /* 核心修正：固定圖表容器高度，防止無限拉長崩潰 */
+        .chart-container { position: relative; height: 200px; width: 100%; }
     </style>
 </head>
 <body class="p-4 md:p-8">
@@ -109,7 +111,9 @@
         <!-- 曲線圖 -->
         <div class="card">
             <h2 class="font-semibold text-lg text-gray-700 mb-4">📈 歷史進度趨勢</h2>
-            <canvas id="trendChart" height="180"></canvas>
+            <div class="chart-container">
+                <canvas id="trendChart"></canvas>
+            </div>
         </div>
     </div>
 
@@ -117,6 +121,13 @@
         const API_URL = "https://script.google.com/macros/s/AKfycbzE9f5KFW5O2Yc24Kae5SOdJWcAOhHMztFHptYMGPhc9fPWBdMYSPLr2FGUCK2ywMJFug/exec";
         let taskHistory = {};
         let myChart;
+
+        // 穩定版日期轉換函數：解決日期減一天的問題
+        function toLocalDateString(d) {
+            const date = new Date(d);
+            const offset = date.getTimezoneOffset() * 60000;
+            return (new Date(date.getTime() - offset)).toISOString().split('T')[0];
+        }
 
         // 初始化與讀取數據
         window.onload = async () => {
@@ -128,13 +139,15 @@
                     document.getElementById('totalTasks').value = data.totalTasks || 772;
                     document.getElementById('totalPay').value = data.totalPay || 15000;
                     document.getElementById('completed').value = data.completed || 0;
-                    document.getElementById('startDate').value = data.startDate.split('T')[0];
-                    document.getElementById('deadline').value = data.deadline.split('T')[0];
+                    
+                    // 使用穩定的日期轉換
+                    if(data.startDate) document.getElementById('startDate').value = toLocalDateString(data.startDate);
+                    if(data.deadline) document.getElementById('deadline').value = toLocalDateString(data.deadline);
                     
                     taskHistory = {};
                     data.history.forEach(row => {
-                        const dateStr = new Date(row[0]).toISOString().split('T')[0];
-                        taskHistory[dateStr] = row[1];
+                        const dateKey = toLocalDateString(row[0]);
+                        taskHistory[dateKey] = row[1];
                     });
                 }
             } catch (e) {
@@ -173,8 +186,7 @@
                     method: "POST",
                     body: JSON.stringify(payload)
                 });
-                // 更新圖表紀錄
-                const todayStr = new Date().toISOString().split('T')[0];
+                const todayStr = toLocalDateString(new Date());
                 taskHistory[todayStr] = payload.done;
                 updateUI();
             } catch (e) {
@@ -186,8 +198,13 @@
         }
 
         function updateUI() {
-            const start = new Date(document.getElementById('startDate').value);
-            const end = new Date(document.getElementById('deadline').value);
+            const startStr = document.getElementById('startDate').value;
+            const endStr = document.getElementById('deadline').value;
+            
+            if (!startStr || !endStr) return;
+
+            const start = new Date(startStr);
+            const end = new Date(endStr);
             const now = new Date();
             now.setHours(0,0,0,0);
 
@@ -207,7 +224,6 @@
             const dailyTargetNeeded = remainingDays > 0 ? ((total - done) / remainingDays).toFixed(1) : (total - done);
             const earned = Math.floor(done * (pay / total));
 
-            // 更新 DOM
             document.getElementById('taskBar').style.width = taskProgress + '%';
             document.getElementById('taskPercent').innerText = taskProgress.toFixed(1) + '%';
             document.getElementById('timeBar').style.width = timeProgress + '%';
@@ -228,7 +244,9 @@
         }
 
         function updateChart() {
-            const ctx = document.getElementById('trendChart').getContext('2d');
+            const chartCanvas = document.getElementById('trendChart');
+            if (!chartCanvas) return;
+            const ctx = chartCanvas.getContext('2d');
             const sortedDates = Object.keys(taskHistory).sort();
             const dataValues = sortedDates.map(date => taskHistory[date]);
 
@@ -250,6 +268,7 @@
                 },
                 options: {
                     responsive: true,
+                    maintainAspectRatio: false, // 核心修正：避免無限放大
                     scales: { y: { beginAtZero: true }, x: { grid: { display: false } } },
                     plugins: { legend: { display: false } }
                 }
